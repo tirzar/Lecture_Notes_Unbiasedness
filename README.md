@@ -103,10 +103,8 @@ If you use this code, please cite:
 ```bibtex
 @article{Routtenberg2025LehmannLN,
   author    = {T. Routtenberg and J. Tabrikian},
-  title     = {Lehmann-Unbiasedness and {Cram\'{e}r--Rao}-Type Bounds 
-               for Different Loss Functions},
-  journal   = {IEEE Signal Processing Magazine, Lecture Notes},
-  year      = {2025}
+  title     = {Lehmann-Unbiasedness and {Cram\'{e}r--Rao}-Type Bounds for Different Loss Functions},
+  year      = {2026}
 }
 
 @article{Nitzan2019LUCCRB,
