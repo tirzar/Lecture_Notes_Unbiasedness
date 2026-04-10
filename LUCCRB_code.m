@@ -1,0 +1,156 @@
+%% =========================================================
+%  LU-CCRB Simulation: Linear Model with Norm Constraint
+%  Reproduces key results from:
+%    Nitzan, Routtenberg & Tabrikian, IEEE TSP, vol.67, 2019.
+%
+%  Model:      x = theta + n,  n ~ N(0, sigma2 * I_M)
+%  Constraint: ||theta||^2 = rho^2
+%  CML:        theta_hat = rho * x / ||x||
+%  Parameters: M=3, sigma2=16, 10000 Monte Carlo trials
+%% =========================================================
+clear; clc; rng(0);
+
+%% --- Simulation parameters ---
+M        = 3;          % Parameter dimension (H = I_M)
+sigma2   = 16;         % Noise variance
+n_mc     = 100000;      % Monte Carlo trials
+rho_vec = logspace(log10(0.3), log10(100), 50);  % Constraint norm values
+
+% Fixed true-parameter direction (spherical coordinates)
+phi1 = 0.2*pi;   phi2 = 0.45*pi;
+theta_unit = [cos(phi1)*sin(phi2);
+              sin(phi1)*sin(phi2);
+              cos(phi2)];           % unit vector
+
+%% --- Preallocate ---
+MSE_trace  = zeros(size(rho_vec));
+bias_norm  = zeros(size(rho_vec));
+Cbias_norm = zeros(size(rho_vec));
+
+%% --- Monte Carlo loop ---
+fprintf('Running Monte Carlo (%d trials)...\n', n_mc);
+for i = 1:length(rho_vec)
+    rho        = rho_vec(i);
+    theta_true = rho * theta_unit;   % M x 1
+
+    % Null-space matrix U(theta): tangent plane to sphere at theta_true
+    % Closed form for M=3 norm constraint (eq. 70, Nitzan et al. 2019)
+    U = tangent_basis_sphere(theta_true, rho);  % M x (M-1)
+
+    % Generate observations and compute CML
+    err_mat = zeros(M, n_mc);
+    for t = 1:n_mc
+        x           = theta_true + sqrt(sigma2) * randn(M, 1);
+        theta_hat   = rho * x / norm(x);          % CML estimator
+        err_mat(:,t) = theta_hat - theta_true;
+    end
+
+    % Empirical statistics
+    mean_bias       = mean(err_mat, 2);           % M x 1
+    bias_norm(i)    = norm(mean_bias);
+    Cbias_norm(i)   = norm(U' * mean_bias);       % C-bias norm
+    MSE_trace(i)    = mean(sum(err_mat.^2, 1));
+end
+fprintf('Done.\n');
+
+%% --- Analytical bounds ---
+% Tr(CCRB) = (M-1)*sigma2  [eq.(67), constant in rho]
+CCRB_trace = (M-1) * sigma2 * ones(size(rho_vec));  % = 32
+
+% LU-CCRB = ( 1/rho^2 + 1/Tr(CCRB) )^{-1}  [eq.(68), (64)]
+Tr_CCRB = (M-1)*sigma2;   % = 32
+LU_CCRB = 1./(1./rho_vec.^2 + 1/Tr_CCRB);
+
+%% --- Verify bounds ---
+% Sanity check: LU-CCRB should always be <= CCRB_trace
+assert(all(LU_CCRB <= CCRB_trace + 1e-10), ...
+    'Order relation LU-CCRB <= CCRB violated!');
+
+%% --- Figure: 2-panel ---
+figure('Units','inches','Position',[1 1 8.5 3.5]);
+
+% ---- Panel (a): Bias verification ----
+ax1 = subplot(2,1,1);
+semilogx(rho_vec, bias_norm,  'r-s', 'LineWidth',1.8, 'MarkerSize',4, ...
+     'DisplayName','Mean bias $\|\mathbf{b}_{\hat{\bf{\theta}}}\|$');
+hold on;
+semilogx(rho_vec, Cbias_norm, 'b-o', 'LineWidth',1.8, 'MarkerSize',4, ...
+     'DisplayName','C-bias $\|\mathbf{U}^T\mathbf{b}_{\hat{\bf{\theta}}}\|$');
+yline(0,'k--','LineWidth',1,'HandleVisibility','off');
+xlabel('$\rho$','Interpreter','latex','FontSize',13);
+ylabel('Bias norm','FontSize',12);
+legend('Interpreter','latex','FontSize',10,'Location','northwest');
+title('(a) Bias of CML estimator','Interpreter','latex','FontSize',12);
+grid on;
+xlim([rho_vec(1) rho_vec(end)]);
+ylim([-0.05, max(bias_norm)*1.15]);
+
+% ---- Panel (b): Performance comparison ----
+ax2 = subplot(2,1,2);
+loglog(rho_vec, MSE_trace,  'k-o',  'LineWidth',1.8, 'MarkerSize',4, ...
+         'DisplayName','MSE trace (CML)');
+hold on;
+loglog(rho_vec, LU_CCRB,   'b--',  'LineWidth',2.2, ...
+         'DisplayName','LU-CCRB');
+loglog(rho_vec, CCRB_trace, 'r-.', 'LineWidth',2.2, ...
+         'DisplayName','Tr(CCRB)');
+% Shade region where CCRB > MSE (CCRB is invalid there)
+invalid_idx = find(CCRB_trace > MSE_trace);
+if ~isempty(invalid_idx)
+    xfill = [rho_vec(invalid_idx), fliplr(rho_vec(invalid_idx))];
+    yfill = [MSE_trace(invalid_idx), fliplr(CCRB_trace(invalid_idx))];
+    fill(ax2, xfill, yfill, [1 0.8 0.8], 'EdgeColor','none', ...
+         'FaceAlpha',0.4, 'HandleVisibility','off');
+end
+xlabel('$\rho$','Interpreter','latex','FontSize',13);
+ylabel('MSE trace','FontSize',12);
+legend('FontSize',10,'Location','southeast');
+title('(b) MSE trace vs.\ constraint norm','Interpreter','latex','FontSize',12);
+grid on;
+xlim([rho_vec(1) rho_vec(end)]);
+text(1.5, 5, 'CCRB not valid', 'Color','r','FontSize',9,'FontAngle','italic');
+
+set(gcf,'Color','w');
+set(gca,'XScale','log')
+% Optional: saveas(gcf,'fig_luccrb.eps','epsc');
+
+%% =========================================================
+%  Helper function: tangent basis for sphere constraint
+%  Computes U(theta) s.t. U^T*theta = 0, U^T*U = I_{M-1}
+%  Closed form for M=3 (eq. 70 in Nitzan et al. 2019)
+%% =========================================================
+function U = tangent_basis_sphere(theta, rho)
+    % Inputs:
+    %   theta : M x 1 parameter vector on sphere of radius rho
+    %   rho   : constraint norm value
+    % Output:
+    %   U     : M x (M-1) orthonormal null-space matrix
+    %           satisfying F(theta)*U = 0,  U^T*U = I_{M-1}
+    %           where F(theta) = 2*theta^T (Jacobian of norm constraint)
+
+    t1  = theta(1);  t2 = theta(2);  t3 = theta(3);
+    r12 = sqrt(t1^2 + t2^2);
+
+    if r12 < 1e-12
+        % Degenerate case: theta aligned with z-axis
+        % Use standard basis for xy-plane
+        U = [1 0; 0 1; 0 0];
+        return;
+    end
+
+    % Column 1: azimuthal tangent vector (in xy-plane)
+    col1 = [ t2/r12; -t1/r12; 0 ];
+
+    % Column 2: polar tangent vector (meridional direction)
+    col2 = [ t1*t3/(r12*rho); ...
+             t2*t3/(r12*rho); ...
+            -r12/rho ];
+
+    U = [col1, col2];
+
+    %% Verification (enable during debugging)
+    % assert(abs(norm(col1)-1) < 1e-10, 'col1 not unit');
+    % assert(abs(norm(col2)-1) < 1e-10, 'col2 not unit');
+    % assert(abs(col1'*col2)   < 1e-10, 'cols not orthogonal');
+    % assert(norm(U'*theta)    < 1e-10, 'U not in null space of F');
+end
