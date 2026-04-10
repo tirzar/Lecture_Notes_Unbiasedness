@@ -1,7 +1,7 @@
 %% =========================================================
 %  Cyclic CRB Simulation: Phase Estimation in AWGN
 %  Model: x[n] = A*exp(j*(n*omega + theta)) + w[n]
-%  Routtenberg & Tabrikian, IEEE SPM Lecture Notes.
+%  Routtenberg & Tabrikian, Lecture Notes.
 %
 %  Parameters: N=5, A=1, SNR=-30:2:10 dB, 10000 MC trials
 %% =========================================================
